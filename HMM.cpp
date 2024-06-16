@@ -1,122 +1,149 @@
 #include <iostream>
 #include <vector>
 #include <unordered_map>
+#include <map>
 #include <string>
-#include <algorithm>
 
 using namespace std;
 
-bool isMatch(const vector<char>& col) {
-    int noGaps = count_if(col.begin(), col.end(), [](char c) { return c != '-'; });
-    return noGaps > col.size() / 2;
+struct EmissionProbabilities {
+    map<int, unordered_map<char, double>> matchState; 
+};
+
+struct TransitionProbabilities {
+    unordered_map<string, double> transitions;
+};
+
+void initializeProbabilities(TransitionProbabilities &transition, int numColumns) {
+    for (int i = 1; i < numColumns; ++i) {
+        transition.transitions["M" + to_string(i) + "toM" + to_string(i + 1)] = 0.0;
+        transition.transitions["M" + to_string(i) + "toI" + to_string(i)] = 0.0;
+        transition.transitions["M" + to_string(i) + "toD" + to_string(i)] = 0.0;
+        transition.transitions["I" + to_string(i) + "toM" + to_string(i + 1)] = 0.0;
+        transition.transitions["I" + to_string(i) + "toI" + to_string(i)] = 0.0;
+        transition.transitions["D" + to_string(i) + "toM" + to_string(i + 1)] = 0.0;
+        transition.transitions["D" + to_string(i) + "toD" + to_string(i + 1)] = 0.0;
+    }
 }
 
-unordered_map<int, unordered_map<char, double>> calcProbEmision(const vector<string>& secuencias, const vector<int>& colsCoincidencia) {
-    string simbolos = "ACDEFGHIJKLMNOPQRSTUVWXYZ-";
-    int numEstados = colsCoincidencia.size();
-    unordered_map<int, unordered_map<char, int>> conteoEmision;
+vector<int> selectColumns(const vector<string> &sequences) {
+    vector<int> selectedColumns;
+    int numSequences = sequences.size();
+    int sequenceLength = sequences[0].length();
+    int threshold = numSequences / 2;
 
-    for (int i = 0; i < numEstados; ++i) {
-        for (char s : simbolos) {
-            conteoEmision[i][s] = 0;
+    for (int i = 0; i < sequenceLength; ++i) {
+        int symbolCount = 0;
+        for (int j = 0; j < numSequences; ++j) {
+            if (sequences[j][i] != '-') {
+                symbolCount++;
+            }
+        }
+        if (symbolCount >= threshold) {
+            selectedColumns.push_back(i);
         }
     }
 
-    for (const string& sec : secuencias) {
-        for (int i = 0; i < numEstados; ++i) {
-            char simbolo = sec[colsCoincidencia[i]];
-            conteoEmision[i][simbolo]++;
-        }
-    }
-
-    unordered_map<int, unordered_map<char, double>> probEmision;
-    for (int i = 0; i < numEstados; ++i) {
-        int total = 0;
-        for (char s : simbolos) {
-            total += conteoEmision[i][s] + 1;
-        }
-        for (char s : simbolos) {
-            probEmision[i][s] = (conteoEmision[i][s] + 1.0) / total;
-        }
-    }
-
-    return probEmision;
+    return selectedColumns;
 }
 
-unordered_map<int, unordered_map<char, double>> calcProbTransicion(const vector<string>& secuencias, const vector<int>& colsCoincidencia) {
-    int numEstados = colsCoincidencia.size();
-    unordered_map<int, unordered_map<char, int>> conteoTransicion;
+void calculateEmissionProbabilities(const vector<string> &sequences, const vector<int> &selectedColumns, EmissionProbabilities &emission) {
+    int numSequences = sequences.size();
+    int alphabetSize = 20; //  20 aminoácidos
+    int pseudoCount = 1;
 
-    for (int i = 0; i <= numEstados; ++i) {
-        conteoTransicion[i]['M'] = 0;
-        conteoTransicion[i]['X'] = 0;
-        conteoTransicion[i]['Y'] = 0;
+    for (int col : selectedColumns) {
+        unordered_map<char, int> counts;
+        int totalCount = 0;
+
+        for (int j = 0; j < numSequences; ++j) {
+            char symbol = sequences[j][col];
+            if (symbol != '-') {
+                counts[symbol]++;
+                totalCount++;
+            }
+        }
+
+        for (char c = 'A'; c <= 'Z'; ++c) {
+            int count = counts[c];
+            double probability = (count + pseudoCount) / double(totalCount + pseudoCount * alphabetSize);
+            emission.matchState[col][c] = probability;
+        }
+    }
+}
+
+void calculateTransitionProbabilities(const vector<string> &sequences, const vector<int> &selectedColumns, TransitionProbabilities &transition) {
+    int numSequences = sequences.size();
+    int pseudoCount = 1;
+    int stateCount = 3; // M, I, D
+
+    unordered_map<string, int> transitionCounts;
+    unordered_map<string, int> stateCounts;
+
+    for (int i = 1; i < selectedColumns.size(); ++i) {
+        transitionCounts["M" + to_string(i) + "toM" + to_string(i + 1)] = 0;
+        transitionCounts["M" + to_string(i) + "toI" + to_string(i)] = 0;
+        transitionCounts["M" + to_string(i) + "toD" + to_string(i)] = 0;
+        stateCounts["M" + to_string(i)] = 0;
     }
 
-    for (const string& sec : secuencias) {
-        for (int i = 0; i < numEstados; ++i) {
-            char simbolo = sec[colsCoincidencia[i]];
-            if (simbolo == '-') {
-                conteoTransicion[i]['Y']++;
+    for (int seqIndex = 0; seqIndex < numSequences; ++seqIndex) {
+        for (int i = 1; i < selectedColumns.size(); ++i) {
+            int colIndex = selectedColumns[i];
+            int prevColIndex = selectedColumns[i - 1];
+
+            if (sequences[seqIndex][prevColIndex] != '-') {
+                stateCounts["M" + to_string(i)]++;
+                if (sequences[seqIndex][colIndex] != '-') {
+                    transitionCounts["M" + to_string(i) + "toM" + to_string(i + 1)]++;
+                } else {
+                    transitionCounts["M" + to_string(i) + "toD" + to_string(i)]++;
+                }
             } else {
-                conteoTransicion[i]['M']++;
+                transitionCounts["M" + to_string(i) + "toI" + to_string(i)]++;
             }
         }
     }
 
-    unordered_map<int, unordered_map<char, double>> probTransicion;
-    for (int i = 0; i <= numEstados; ++i) {
-        int total = conteoTransicion[i]['M'] + conteoTransicion[i]['X'] + conteoTransicion[i]['Y'] + 3;
-        probTransicion[i]['M'] = (conteoTransicion[i]['M'] + 1.0) / total;
-        probTransicion[i]['X'] = (conteoTransicion[i]['X'] + 1.0) / total;
-        probTransicion[i]['Y'] = (conteoTransicion[i]['Y'] + 1.0) / total;
-    }
+    for (int i = 1; i < selectedColumns.size(); ++i) {
+        string mToM = "M" + to_string(i) + "toM" + to_string(i + 1);
+        string mToI = "M" + to_string(i) + "toI" + to_string(i);
+        string mToD = "M" + to_string(i) + "toD" + to_string(i);
 
-    return probTransicion;
+        transition.transitions[mToM] = (transitionCounts[mToM] + pseudoCount) / double(stateCounts["M" + to_string(i)] + pseudoCount * stateCount);
+        transition.transitions[mToI] = (transitionCounts[mToI] + pseudoCount) / double(stateCounts["M" + to_string(i)] + pseudoCount * stateCount);
+        transition.transitions[mToD] = (transitionCounts[mToD] + pseudoCount) / double(stateCounts["M" + to_string(i)] + pseudoCount * stateCount);
+    }
 }
 
-vector<int> getMatch(const vector<string>& secuencias) {
-    int numCols = secuencias[0].size();
-    vector<int> colsCoincidencia;
-    for (int col = 0; col < numCols; ++col) {
-        vector<char> columna;
-        for (const string& sec : secuencias) {
-            columna.push_back(sec[col]);
-        }
-        if (isMatch(columna)) {
-            colsCoincidencia.push_back(col);
-        }
-    }
-    return colsCoincidencia;
-}
 
-void HMM(const vector<string>& secuencias) {
-    vector<int> colsCoincidencia = getMatch(secuencias);
-    unordered_map<int, unordered_map<char, double>> probEmision = calcProbEmision(secuencias, colsCoincidencia);
-    unordered_map<int, unordered_map<char, double>> probTransicion = calcProbTransicion(secuencias, colsCoincidencia);
+void HMM(const vector<string> &sequences) {
+    EmissionProbabilities emission;
+    TransitionProbabilities transition;
 
-    cout << "Columnas de coincidencia: ";
-    for (size_t i = 0; i < colsCoincidencia.size(); ++i) {
-        cout << colsCoincidencia[i] << " ";
-    }
-    cout << endl;
+    vector<int> selectedColumns = selectColumns(sequences);
+    initializeProbabilities(transition, selectedColumns.size());
+    calculateEmissionProbabilities(sequences, selectedColumns, emission);
+    calculateTransitionProbabilities(sequences, selectedColumns, transition);
 
-    cout << "Probabilidades de emisión:" << endl;
-    for (unordered_map<int, unordered_map<char, double>>::iterator it = probEmision.begin(); it != probEmision.end(); ++it) {
-        cout << "Estado " << it->first << ": ";
-        for (unordered_map<char, double>::iterator jt = it->second.begin(); jt != it->second.end(); ++jt) {
-            cout << jt->first << " -> " << jt->second << ", ";
+
+    cout << "Probabilidades de emisión (estado de coincidencia):" << endl;
+    for (auto &colEntry : emission.matchState) {
+        cout << "Columna " << colEntry.first << ":" << endl;
+        for (auto &entry : colEntry.second) {
+            cout << "bm" << colEntry.first + 1 << entry.first << " = " << entry.second << endl;
         }
-        cout << endl;
     }
 
     cout << "Probabilidades de transición:" << endl;
-    for (unordered_map<int, unordered_map<char, double>>::iterator it = probTransicion.begin(); it != probTransicion.end(); ++it) {
-        cout << "Estado " << it->first << ": ";
-        for (unordered_map<char, double>::iterator jt = it->second.begin(); jt != it->second.end(); ++jt) {
-            cout << jt->first << " -> " << jt->second << ", ";
-        }
-        cout << endl;
+    for (int i = 1; i < selectedColumns.size(); ++i) {
+        string mToM = "M" + to_string(i) + "toM" + to_string(i + 1);
+        string mToI = "M" + to_string(i) + "toI" + to_string(i);
+        string mToD = "M" + to_string(i) + "toD" + to_string(i);
+
+        cout << mToM << " = " << transition.transitions[mToM] << endl;
+        cout << mToI << " = " << transition.transitions[mToI] << endl;
+        cout << mToD << " = " << transition.transitions[mToD] << endl;
     }
 }
 
@@ -133,5 +160,4 @@ int main() {
 
     HMM(secuencias);
 
-    return 0;
 }
